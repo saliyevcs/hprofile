@@ -1,17 +1,19 @@
 name: Hprofile Actions
-on: workflow_dispatch 
-jobs: 
+on: workflow_dispatch
+env:
+  AWS_REGION: us-east-1
+jobs:
   Testing:
     runs-on: ubuntu-latest
-    steps: 
-      - name: Checkout code
-        uses: actions/checkout@v4
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v4 
 
       - name: Maven test
         run: mvn test
-        
+
       - name: Checkstyle
-        run: mvn checkstyle:checkstyle  
+        run: mvn checkstyle:checkstyle
 
       # Setup java 11 to be default (sonar-scanner requirement as of 5.x)
       - name: Set Java 11
@@ -35,7 +37,7 @@ jobs:
            -Dsonar.junit.reportsPath=target/surefire-reports/ 
            -Dsonar.jacoco.reportsPath=target/jacoco.exec 
            -Dsonar.java.checkstyle.reportPaths=target/checkstyle-result.xml
-           -Dsonar.java.binaries=target/test-classes/com/visualpathit/account/controllerTest/  
+           -Dsonar.java.binaries=target/test-classes/com/visualpathit/account/controllerTest/
 
       # Check the Quality Gate status.
       - name: SonarQube Quality Gate check
@@ -45,4 +47,32 @@ jobs:
         timeout-minutes: 5
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_URL }} #OPTIONAL
+          SONAR_HOST_URL: ${{ secrets.SONAR_URL }} #OPTIONAL   
+
+  BUILD_AND_PUBLISH:
+    needs: Testing
+    runs-on: ubuntu-latest
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v4
+
+      - name: Update application.properties file
+        run: |
+          sed -i "s/^jdbc.username.*$/jdbc.username\=${{ secrets.RDS_USER }}/" src/main/resources/application.properties
+          sed -i "s/^jdbc.password.*$/jdbc.password\=${{ secrets.RDS_PASS }}/" src/main/resources/application.properties
+          sed -i "s/db01/${{ secrets.RDS_ENDPOINT }}/" src/main/resources/application.properties
+
+      - name: Build & Upload image to ECR
+        uses: appleboy/docker-ecr-action@master #Docker ECR by appleboy
+        with:
+         access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
+         secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+         registry: ${{ secrets.REGISTRY }}
+         repo: actapp
+         region: ${{ env.AWS_REGION }}
+         tags: latest,${{ github.run_number }}
+         daemon_off: false
+         dockerfile: ./Dockerfile
+         context: ./
+
+  
